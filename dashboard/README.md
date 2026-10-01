@@ -1,39 +1,52 @@
-# Ausbildungsstand-Dashboard (NFP – Gesamtübersicht aller Bezirke)
+# Ausbildungsstand-Dashboard LST (Bedarf_Bestand_LST + Zielzustand)
 
-Erzeugt aus der Datei „NFP – Gesamtübersicht aller Bezirke LST-intern.xlsx“ eine Kopie
-mit Excel-Dashboard. Die Original-Blätter bleiben unverändert; neu hinzu kommen:
+Erzeugt aus „Bedarf_Bestand_LST.xlsx“ (Mitarbeiter je Bezirk) und „LST_Zielzustand_gesamt.xlsx“ (Soll)
+eine Kopie mit Excel-Dashboard. Die Original-Blätter bleiben unverändert; neu hinzu kommen:
 
 | Blatt | Inhalt |
 |---|---|
 | Übersicht | Kennzahlen, „Alle Bezirke nach Status“, „Status je Bezirk“, Tabelle mit Links zu den Bezirksseiten |
-| Grafik &lt;Bezirk&gt; (12×) | Kennzahlen, „Mitarbeiter nach Status“, „Status nach Ziel-Qualifikation“, Zahlentabelle, Mitarbeiterliste |
-| Daten | Auswertung je Mitarbeiter (per Formel, z. B. als Quelle für Power BI) |
-| Einstellungen | Bezugsjahr, Status-Kategorien, Zuordnung Qualifikation → Spalte J–Q |
+| Soll-Ist | Fachkräfte je Bezirk (Soll / heute / nach Plan), Verlauf LST gesamt, Verlauf je Bezirk (12 kleine Diagramme, gleiche Skala), Tabellen je Bezirk und Qualifikation |
+| Grafik &lt;Bezirk&gt; (12×) | Kennzahlen, Status-Diagramme, Soll-Ist je Qualifikation, Verlauf gegenüber Soll (gesamt und je Qualifikation), Zahlen, Mitarbeiterliste |
+| Daten | Auswertung je Mitarbeiter (per Formel) |
+| Zielzustand | Kopie von „LST_Zielzustand_gesamt.xlsx“, Tabelle1 – hier das Soll ändern |
+| Einstellungen | Bezugsjahr, Status-Kategorien, Zuordnung Bezirks-Blatt → Zielzustand, Zuordnung Qualifikation → Spalte |
 
-Alles rechnet mit Formeln. Ändert man Werte in den Bezirks-Blättern, passen sich Zahlen
-und Diagramme automatisch an.
+Alles rechnet mit Formeln. Ändert man Werte in den Bezirks-Blättern oder im Blatt Zielzustand, passen sich
+Zahlen und Diagramme automatisch an.
+
+## Spalten in den Bezirks-Blättern
+
+G = Ziel-Qualifikation, J = Ist-Qualifikation, L–S = Stand je Qualifikation (Azubi … Teamleiter),
+U/V = örtliche Verwendungsprüfung Wmech/SigMech. „x“ = erledigt, Jahreszahl (z. B. 27) = geplant.
 
 ## Status je Mitarbeiter
 
-Ziel-Qualifikation (Spalte F) → zugehörige Spalte J–Q (Zuordnung im Blatt Einstellungen):
-
-1. **Fertig**: „x“ in der Ziel-Spalte (oder Ist-Qualifikation = Ziel-Qualifikation)
-2. **Abschluss &lt;Jahr&gt;**: Jahreszahl in der Ziel-Spalte (27 → 2027), einzeln je Jahr ab dem Bezugsjahr, das letzte Jahr als „ab …“
+1. **Fertig**: „x“ in der Ziel-Spalte, bei Wmech/SigMech auch „x“ bei der örtlichen Verwendungsprüfung
+   (oder Ist-Qualifikation = Ziel-Qualifikation)
+2. **Abschluss &lt;Jahr&gt;**: geplantes Jahr (das frühere aus Ziel-Spalte und Verwendungsprüfung), einzeln je Jahr ab dem Bezugsjahr
 3. **Überfällig**: das Jahr liegt vor dem Bezugsjahr, aber es steht noch kein „x“
-4. **Fehlt**: weder „x“ noch Jahr, also keine Ausbildung geplant
-5. **Ziel nicht eingetragen**: Spalte F ist leer
+4. **Fehlt (nichts geplant)**: weder „x“ noch Jahr
+5. **Ziel nicht eingetragen**: Spalte G ist leer
 
-Das Blatt „Bezirksleiter FBÜW“ wird nicht ausgewertet.
+## Soll-Ist und Verlauf
+
+- Soll = Spalte „Zielzustand“ je Bezirk (Zeilen Arbeiter LST, Wmech, SigMech, SigMech RBEG, Teamleiter).
+- Ist zum Ende eines Jahres: Wer bis dahin fertig ist, zählt in seiner Ziel-Qualifikation, alle anderen in ihrer
+  Ist-Qualifikation (Azubis/Umschüler unter „Sonstige“). Überfällige zählen ab dem Bezugsjahr.
+- Fachkräfte = Wmech + SigMech + SigMech RBEG + Teamleiter. „Lücke zum Soll“ = Summe der Fehlmengen je Bezirk und Qualifikation.
 
 ## Neu erzeugen
 
 ```bash
-pip install openpyxl lxml        # zusätzlich LibreOffice mit Calc (soffice)
-python build_dashboard.py "<original>.xlsx" "<ausgabe>.xlsx"
+pip install openpyxl lxml        # zusätzlich LibreOffice mit Calc (Paket libreoffice-calc)
+python build_dashboard.py "<Bedarf_Bestand_LST>.xlsx" "<LST_Zielzustand_gesamt>.xlsx" "<ausgabe>.xlsx"
 ```
 
-- `build_sheets.py`: baut die neuen Blätter mit openpyxl
-- `merge_into_original.py`: setzt sie direkt in das .xlsx-Paket des Originals ein, damit Kommentare, Diagramme und SharePoint-Metadaten erhalten bleiben
-- `inject_cache.py`: speichert die mit LibreOffice berechneten Werte in Zellen und Diagrammen, damit auch die geschützte Ansicht die Zahlen zeigt
+- `build_sheets.py`: baut die neuen Blätter mit openpyxl (Diagramme sind an Zellbereiche gebunden)
+- `merge_into_original.py`: setzt sie direkt in das .xlsx-Paket des Originals ein, damit Kommentare, Diagramme,
+  externe Verknüpfungen und Metadaten erhalten bleiben
+- `inject_cache.py`: speichert die mit LibreOffice berechneten Werte in Zellen und Diagrammen, damit auch die
+  geschützte Ansicht die Zahlen zeigt
 
 Die Excel-Dateien enthalten Personaldaten und werden nicht eingecheckt (`.gitignore`).

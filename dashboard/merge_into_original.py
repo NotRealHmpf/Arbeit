@@ -2,7 +2,7 @@
 ohne die Original-Blaetter anzufassen (Kommentare, Diagramme, SharePoint-Metadaten
 usw. bleiben erhalten). Dazu werden die XML-Teile direkt im .xlsx-Paket ergaenzt.
 
-Reihenfolge danach:  Uebersicht, Grafik <Bezirk> ..., <Original-Blaetter>, Daten, Einstellungen
+Reihenfolge danach:  Uebersicht, Soll-Ist, Grafik <Bezirk> ..., <Original-Blaetter>, Daten, Zielzustand, Einstellungen
 """
 import re
 import zipfile
@@ -21,7 +21,7 @@ CT_CHART = "application/vnd.openxmlformats-officedocument.drawingml.chart+xml"
 REL_SHEET = "http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet"
 REL_CALCCHAIN = "http://schemas.openxmlformats.org/officeDocument/2006/relationships/calcChain"
 
-TAIL_SHEETS = ("Daten", "Einstellungen")   # kommen ans Ende, alle anderen neuen nach vorne
+TAIL_SHEETS = ("Daten", "Zielzustand", "Einstellungen")   # kommen ans Ende, alle anderen neuen nach vorne
 
 
 def xml(data):
