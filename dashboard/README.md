@@ -31,15 +31,15 @@ U/V = örtliche Verwendungsprüfung Wmech/SigMech. „x“ = erledigt, Jahreszah
 
 ## Soll-Ist und Verlauf
 
-- Soll = Spalte „Zielzustand“ je Bezirk (Zeilen Arbeiter LST, Wmech, SigMech, SigMech RBEG, Teamleiter).
-- Jeder Mitarbeiter zählt genau einmal – in seiner höchsten Qualifikation
-  (Teamleiter S > SigMech RBEG P > SigMech O > Wmech N > Arbeiter LST M), so wie die Spalte „IST Mrz.“ im Zielzustand.
-- Heute = höchste Spalte mit „x“ (Wmech/SigMech auch „x“ bei der Verwendungsprüfung U/V); ohne „x“ zählt die Ist-Qualifikation.
-- Verlauf: Zum Jahresende zählt die höchste Spalte mit „x“ oder geplantem Jahr bis dahin – auch über die Ziel-Qualifikation
-  hinaus. Überfällige Jahre zählen ab dem Bezugsjahr. „Nach Plan“ = alle eingetragenen Jahre erreicht.
-- Fachkräfte = Wmech + SigMech + SigMech RBEG + Teamleiter.
-- Lücke zum Soll = Soll-Stellen, die nicht besetzt werden können; höher Qualifizierte dürfen Stellen niedrigerer Qualifikation
-  besetzen. „Über Soll“ = Mitarbeiter, die für keine Soll-Stelle gebraucht werden.
+- Jede Zeile zählt alle Mitarbeiter mit dieser **oder einer höheren** Qualifikation
+  (Teamleiter S > SigMech RBEG P > SigMech O > Wmech N > Arbeiter LST M). Ein SigMech RBEG zählt also auch bei SigMech.
+- Soll je Zeile = Spalte „Zielzustand“ dieser Zeile plus aller höheren Zeilen (z. B. SigMech: SigMech + SigMech RBEG + Teamleiter).
+- Heute = „x“ (Wmech/SigMech auch „x“ bei der Verwendungsprüfung U/V); ohne „x“ zählt die Ist-Qualifikation.
+- Verlauf: Zum Jahresende zählt „x“ oder ein geplantes Jahr bis dahin – auch über die Ziel-Qualifikation hinaus.
+  Überfällige Jahre zählen ab dem Bezugsjahr. „Nach Plan“ = alle eingetragenen Jahre erreicht.
+- Fachkräfte = Wmech und höher.
+- Lücke zum Soll = größte Fehlmenge über alle Zeilen (Stellen, die nicht besetzt werden können).
+  „Über Soll“ = Mitarbeiter, die für keine Soll-Stelle gebraucht werden.
 
 ## Neu erzeugen
 

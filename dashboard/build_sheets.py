@@ -513,15 +513,14 @@ def pct_sub(count_ref, total_ref):
 
 
 def gap_sum(soll_col, ist_col, first, last):
-    """Unbesetzte Soll-Stellen, wenn hoeher Qualifizierte auch Stellen niedrigerer Qualifikation besetzen koennen.
-    Zeilen first..last aufsteigend nach Qualifikation: Luecke = groesste Fehlmenge ueber alle "ab Stufe X aufwaerts"-Summen."""
-    parts = [f"SUM({soll_col}{k}:{soll_col}{last})-SUM({ist_col}{k}:{ist_col}{last})" for k in range(first, last + 1)]
-    return "MAX(0," + ",".join(parts) + ")"
+    """Unbesetzte Soll-Stellen. Die Zeilen sind kumuliert ("diese Stufe und hoeher"), hoeher Qualifizierte koennen also
+    Stellen darunter besetzen: Luecke = groesste Fehlmenge ueber alle Zeilen."""
+    return "MAX(0," + ",".join(f"{soll_col}{k}-{ist_col}{k}" for k in range(first, last + 1)) + ")"
 
 
 def surplus_sum(soll_col, ist_col, first, last):
-    """Mitarbeiter, die fuer keine Soll-Stelle gebraucht werden."""
-    return f"SUM({ist_col}{first}:{ist_col}{last})-SUM({soll_col}{first}:{soll_col}{last})+{gap_sum(soll_col, ist_col, first, last)}"
+    """Mitarbeiter, die fuer keine Soll-Stelle gebraucht werden (erste Zeile = alle Stufen)."""
+    return f"{ist_col}{first}-{soll_col}{first}+{gap_sum(soll_col, ist_col, first, last)}"
 
 
 def timeline_label(k):
@@ -668,16 +667,16 @@ def build_settings(ws, districts):
         "steht dort eine Jahreszahl (z. B. 27 = 2027), ist das der geplante Abschluss.",
         "Weichenmechaniker und Signalmechaniker sind auch fertig, wenn die örtliche Verwendungsprüfung (U bzw. V) mit „x“ abgehakt ist. "
         "Steht dort ein Jahr, zählt das frühere der beiden Jahre (Ziel-Spalte oder Verwendungsprüfung) als geplanter Abschluss.",
-        "Soll-Ist: Soll = Spalte „Zielzustand“ im Blatt Zielzustand. Ist: Jeder Mitarbeiter zählt genau einmal – in seiner höchsten "
-        "Qualifikation (Teamleiter S > SigMech RBEG P > SigMech O > Wmech N > Arbeiter LST M), so wie die Spalte „IST Mrz.“ im Zielzustand. "
-        "Heute = höchste Spalte mit „x“ (Wmech/SigMech auch „x“ bei der Verwendungsprüfung U/V). Ohne „x“ zählt die Ist-Qualifikation "
-        "(Azubis/Umschüler: „Sonstige“).",
+        "Soll-Ist: Jede Zeile zählt alle Mitarbeiter mit dieser oder einer höheren Qualifikation (Teamleiter S > SigMech RBEG P > "
+        "SigMech O > Wmech N > Arbeiter LST M) – ein SigMech RBEG zählt also auch bei SigMech. Soll = Spalte „Zielzustand“ dieser Zeile "
+        "plus aller höheren Zeilen (z. B. SigMech: SigMech + SigMech RBEG + Teamleiter). Heute = Spalten mit „x“ (Wmech/SigMech auch "
+        "„x“ bei der Verwendungsprüfung U/V). Ohne „x“ zählt die Ist-Qualifikation (Azubis/Umschüler zählen noch nicht).",
         "Verlauf: Zum Ende eines Jahres zählt die höchste Spalte mit „x“ oder mit einem geplanten Jahr bis dahin – auch über die "
         "Ziel-Qualifikation hinaus. Überfällige Jahre zählen ab dem Bezugsjahr. „Nach Plan“ = alle eingetragenen Jahre erreicht. "
         "Fachkräfte = Wmech, SigMech, SigMech RBEG und Teamleiter.",
-        "Lücke zum Soll: Anzahl Soll-Stellen, die nicht besetzt werden können. Höher Qualifizierte dürfen dabei Stellen niedrigerer "
-        "Qualifikation besetzen (Teamleiter > SigMech RBEG > SigMech > Wmech > Arbeiter LST). „Über Soll“ = Mitarbeiter, die für "
-        "keine Soll-Stelle gebraucht werden.",
+        "Lücke zum Soll: Anzahl Soll-Stellen, die nicht besetzt werden können (größte Fehlmenge über alle Zeilen). Höher "
+        "Qualifizierte können dabei Stellen niedrigerer Qualifikation besetzen. „Über Soll“ = Mitarbeiter, die für keine Soll-Stelle "
+        "gebraucht werden.",
         "Das Blatt „Daten“ enthält die Auswertung je Mitarbeiter. Es wird per Formel erzeugt und sollte nicht von Hand geändert werden.",
     ]
     for i, n in enumerate(notes):
@@ -690,7 +689,7 @@ def build_settings(ws, districts):
 DATA_COLS = [
     ("A", "Bezirk", 18), ("B", "Quellzeile", 9), ("C", "Name", 18), ("D", "Vorname", 14),
     ("E", "Ziel-Qualifikation", 18), ("F", "Ist-Qualifikation", 18), ("G", "Gültig", 7),
-    ("H", "Ziel-Nr", 7), ("I", "Ziel-Spalte", 8), ("J", "VP-Spalte", 8), ("K", "Ziel-Kategorie", 14),
+    ("H", "Ziel-Nr", 7), ("I", "Ziel-Spalte", 8), ("J", "VP-Spalte", 8), ("K", "Ziel-Kategorie (für Status)", 14),
     ("L", "Ist-Nr", 7), ("M", "Ist-Spalte", 8), ("N", "Ist-Kategorie", 14),
     ("O", "Eintrag Ziel-Spalte", 10), ("P", "Eintrag Verwendungsprüfung", 12), ("Q", "Jahr Ziel-Spalte", 9),
     ("R", "Jahr Verwendungsprüfung", 12), ("S", "Planjahr", 9), ("T", "Fertig", 7), ("U", "Status-Nr", 8),
@@ -732,10 +731,10 @@ def build_data(ws, districts):
         put(ws, f"{col}1", h, f=font(10, True, "FFFFFF"), fl=fill("52514E"), al=LEFT_WRAP)
     for k, col in enumerate(TL_COLS):
         ws.column_dimensions[col].width = 13
-        head = "Kategorie heute" if k == 0 else f'="Kategorie Ende "&({E_YEAR}+{k - 1})'
+        head = "Höchste Qualifikation heute" if k == 0 else f'="Höchste Qualifikation Ende "&({E_YEAR}+{k - 1})'
         put(ws, f"{col}1", head, f=font(10, True, "FFFFFF"), fl=fill("52514E"), al=LEFT_WRAP)
     ws.column_dimensions[PLAN_COL].width = 13
-    put(ws, f"{PLAN_COL}1", "Kategorie nach Plan", f=font(10, True, "FFFFFF"), fl=fill("52514E"), al=LEFT_WRAP)
+    put(ws, f"{PLAN_COL}1", "Höchste Qualifikation nach Plan", f=font(10, True, "FFFFFF"), fl=fill("52514E"), al=LEFT_WRAP)
     ws.row_dimensions[1].height = 45
     ws.freeze_panes = "C2"
     last = 1 + len(districts) * SRC_ROWS
@@ -815,19 +814,22 @@ T_SOLL, T_TL0, T_PLAN, T_DELTA = "D", 5, "M", "N"
 TL_LETTERS = [get_column_letter(T_TL0 + k) for k in range(N_YEARS + 1)]   # E..L
 HELP0 = 21                                                                 # Spalte U: Soll-Linie (Hilfswerte)
 HELP_LETTERS = [get_column_letter(HELP0 + k) for k in range(N_YEARS + 1)]  # U..AB
-CARRY = "T"                                                                # Hilfsspalte Abdeckung (ausgeblendet)
 
 
 COUNT_NOTE = (
-    "Jeder Mitarbeiter zählt genau einmal – in seiner höchsten Qualifikation (Teamleiter > SigMech RBEG > SigMech > Wmech > "
-    "Arbeiter LST), so wie die Spalte „IST Mrz.“ im Zielzustand. Heute = höchste Spalte mit „x“ (Wmech/SigMech auch über die "
-    "örtl. Verwendungsprüfung), Jahresende = „x“ oder geplantes Jahr bis dahin. Ohne Eintrag zählt die Ist-Qualifikation. "
-    "Lücke: Höher Qualifizierte können Stellen niedrigerer Qualifikation mit besetzen (z. B. SigMech RBEG eine SigMech-Stelle).")
+    "Jede Zeile zählt alle Mitarbeiter mit dieser oder einer höheren Qualifikation (Teamleiter > SigMech RBEG > SigMech > Wmech > "
+    "Arbeiter LST) – ein SigMech RBEG zählt also auch bei SigMech. Soll = Zielzustand dieser Zeile + aller höheren Zeilen. "
+    "Heute = „x“ (Wmech/SigMech auch über die örtl. Verwendungsprüfung), Jahresende = „x“ oder geplantes Jahr bis dahin. "
+    "Ohne Eintrag zählt die Ist-Qualifikation.")
+# Zeilenbeschriftung je Stufe (kumuliert: diese Qualifikation und alle hoeheren)
+LEVEL_LABEL = {"Arbeiter LST": "Arbeiter LST und höher", "Wmech": "Wmech und höher", "SigMech": "SigMech und höher",
+               "SigMech RBEG": "SigMech RBEG und höher", "Teamleiter": "Teamleiter"}
+FACH_LEVEL = "Wmech"        # Fachkraefte = Wmech und hoeher
 
 
 def soll_ist_table(ws, hdr, soll_fn, count_fn):
-    """Schreibt Kopf + 5 Kategorien + Fachkraefte gesamt. soll_fn(cat_row, cat) / count_fn(cat_row, data_col) liefern Formeln.
-    Gibt (erste Kategorie-Zeile, Zeile Fachkraefte) zurueck."""
+    """Kopf + eine Zeile je Stufe (aufsteigend). soll_fn(r, i) / count_fn(r, data_col, i) liefern Formeln fuer
+    Stufe CATS[i] und alle hoeheren. Gibt (erste Zeile, Zeile Fachkraefte, {Kategorie: Zeile}) zurueck."""
     merge_put(ws, f"B{hdr}:C{hdr}", "Qualifikation", f=font(9, True, INK2), fl=fill(HEAD_BG), al=LEFT_WRAP)
     put(ws, f"{T_SOLL}{hdr}", "Soll (Zielzustand)", f=font(9, True, INK2), fl=fill(HEAD_BG), al=CENTER_WRAP)
     for k, col in enumerate(TL_LETTERS):
@@ -842,46 +844,25 @@ def soll_ist_table(ws, hdr, soll_fn, count_fn):
     for i, cat in enumerate(CATS):
         r = first + i
         rows[cat] = r
-        merge_put(ws, f"B{r}:C{r}", cat, f=font(10, True), al=LEFT, border=BOTTOM_HAIR)
-        put(ws, f"{T_SOLL}{r}", soll_fn(r, cat), f=font(10, True), al=CENTER, nf="0", border=BOTTOM_HAIR)
+        bold = cat == FACH_LEVEL
+        merge_put(ws, f"B{r}:C{r}", LEVEL_LABEL[cat], f=font(9, True), al=LEFT, border=BOTTOM_HAIR)
+        put(ws, f"{T_SOLL}{r}", soll_fn(r, i), f=font(10, True), al=CENTER, nf="0", border=BOTTOM_HAIR)
         for k, col in enumerate(TL_LETTERS):
-            put(ws, f"{col}{r}", count_fn(r, TL_COLS[k]), al=CENTER, nf="0", border=BOTTOM_HAIR)
-        put(ws, f"{T_PLAN}{r}", count_fn(r, PLAN_COL), f=font(10, True), al=CENTER, nf="0", border=BOTTOM_HAIR)
-    fr = first + len(CATS)
-    merge_put(ws, f"B{fr}:C{fr}", "Fachkräfte gesamt", f=font(10, True), al=LEFT, border=TOP_INK)
-    fach_rows = [rows[c] for c in FACH]
-    for col in [T_SOLL] + TL_LETTERS + [T_PLAN]:
-        put(ws, f"{col}{fr}", "=" + "+".join(f"{col}{x}" for x in fach_rows), f=font(10, True), al=CENTER, nf="0", border=TOP_INK)
-    # Ausgeblendete Spalte T: Ueberhang hoeherer Qualifikationen, der diese Stufe mit abdecken kann (nach Plan)
-    order = [rows[c] for c in CATS]                       # aufsteigend, oberste Stufe zuletzt
-    for i, r in enumerate(order):
-        if i == len(order) - 1:
-            put(ws, f"{CARRY}{r}", 0)
-        else:
-            up = order[i + 1]
-            put(ws, f"{CARRY}{r}", f"=MAX(0,{T_PLAN}{up}+{CARRY}{up}-{T_SOLL}{up})")
-    for r in list(rows.values()) + [fr]:
-        bold = r == fr
-        put(ws, f"{T_DELTA}{r}", f"={T_PLAN}{r}-{T_SOLL}{r}", f=font(10, bold), al=CENTER, nf=NF_DELTA,
-            border=TOP_INK if bold else BOTTOM_HAIR)
-        S_, P_, C_ = f"{T_SOLL}{r}", f"{T_PLAN}{r}", f"{CARRY}{r}"
-        if bold:
-            short = f'"es fehlen "&({S_}-{P_})'
-        else:
-            open_ = f"MAX(0,{S_}-{P_}-{C_})"
-            short = (f'IF({open_}=0,({S_}-{P_})&" unter Soll – gedeckt durch höhere Qualifikation",'
-                     f'"es fehlen "&{open_}&IF({open_}<{S_}-{P_}," ("&({S_}-{P_}-{open_})&" gedeckt durch höhere Qualifikation)",""))')
+            put(ws, f"{col}{r}", count_fn(r, TL_COLS[k], i), f=font(10, bold), al=CENTER, nf="0", border=BOTTOM_HAIR)
+        put(ws, f"{T_PLAN}{r}", count_fn(r, PLAN_COL, i), f=font(10, True), al=CENTER, nf="0", border=BOTTOM_HAIR)
+        put(ws, f"{T_DELTA}{r}", f"={T_PLAN}{r}-{T_SOLL}{r}", f=font(10, bold), al=CENTER, nf=NF_DELTA, border=BOTTOM_HAIR)
+        S_, P_ = f"{T_SOLL}{r}", f"{T_PLAN}{r}"
         merge_put(ws, f"O{r}:Q{r}",
-                  f'=IF({S_}=0,IF({P_}=0,"–","kein Soll – "&{P_}&" über Soll"),'
-                  f'IF({P_}>={S_},"Soll erreicht"&IF({P_}>{S_}," (+"&({P_}-{S_})&")",""),{short}))',
-                  f=font(9, bold, INK2), al=LEFT, border=TOP_INK if bold else BOTTOM_HAIR)
+                  f'=IF(AND({S_}=0,{P_}=0),"–",IF({P_}>={S_},"Soll erreicht"&IF({P_}>{S_}," (+"&({P_}-{S_})&")",""),'
+                  f'"es fehlen "&({S_}-{P_})))',
+                  f=font(9, bold, INK2), al=LEFT, border=BOTTOM_HAIR)
         for col in HELP_LETTERS:
             put(ws, f"{col}{r}", f"=${T_SOLL}{r}", f=font(8, color=MUTED), nf="0")
-    last = fr
+    last = first + len(CATS) - 1
     add_compare_cf(ws, f"{TL_LETTERS[0]}{first}:{T_PLAN}{last}", T_SOLL, first)
-    merge_put(ws, f"B{fr + 1}:Q{fr + 1}", COUNT_NOTE, f=font(8, italic=True, color=MUTED), al=LEFT_WRAP)
-    ws.row_dimensions[fr + 1].height = 24
-    return first, fr, rows
+    merge_put(ws, f"B{last + 1}:Q{last + 1}", COUNT_NOTE, f=font(8, italic=True, color=MUTED), al=LEFT_WRAP)
+    ws.row_dimensions[last + 1].height = 24
+    return first, rows[FACH_LEVEL], rows
 
 
 # ---------------------------------------------------------------- Blatt: Grafik je Bezirk
@@ -937,12 +918,12 @@ def build_district(ws, d, sheet_names):
 
     section_title(ws, f"B{R_SEC1}:I{R_SEC1}", "Mitarbeiter nach Status")
     section_title(ws, f"J{R_SEC1}:Q{R_SEC1}", "Status nach Ziel-Qualifikation")
-    section_title(ws, f"B{R_SEC2}:I{R_SEC2}", "Soll-Ist je Qualifikation (jeder zählt einmal)")
-    section_title(ws, f"J{R_SEC2}:Q{R_SEC2}", "Verlauf: Fachkräfte gegenüber Soll")
+    section_title(ws, f"B{R_SEC2}:I{R_SEC2}", "Soll-Ist je Qualifikation (inkl. höherer)")
+    section_title(ws, f"J{R_SEC2}:Q{R_SEC2}", "Verlauf: Fachkräfte (Wmech und höher) gegenüber Soll")
     section_title(ws, f"B{R_SEC3}:Q{R_SEC3}", "Verlauf je Qualifikation")
     section_note(ws, f"B{R_SEC3 + 1}:Q{R_SEC3 + 1}",
-                 "Säulen = Mitarbeiter mit dieser Qualifikation als höchster zum Jahresende (laut Planung, jeder zählt einmal) · "
-                 "gestrichelte Linie = Soll (Zielzustand)")
+                 "Säulen = Mitarbeiter mit dieser oder höherer Qualifikation zum Jahresende (laut Planung) · "
+                 "gestrichelte Linie = Soll (Zielzustand dieser und aller höheren Zeilen)")
 
     # Zahlentabelle 1: Status nach Ziel-Kategorie
     section_title(ws, f"B{R_T1}:Q{R_T1}", "Zahlen: Status nach Ziel-Qualifikation")
@@ -967,8 +948,12 @@ def build_district(ws, d, sheet_names):
 
     # Zahlentabelle 2: Soll-Ist und Verlauf
     section_title(ws, f"B{R_T2}:Q{R_T2}", "Zahlen: Soll-Ist und Verlauf je Qualifikation (Anzahl Mitarbeiter zum Jahresende)")
-    soll = lambda r, cat: f"=IF($S$2=0,0,IFERROR(INDEX({ZZ_AREA},MATCH($B{r},{ZZ_LABELS},0),$S$2)*1,0))"
-    count = lambda r, col: f"=COUNTIFS(Daten!$A:$A,$S$1,Daten!${col}:${col},$B{r})"
+    def soll(r, i):
+        parts = [f'IFERROR(INDEX({ZZ_AREA},MATCH("{c}",{ZZ_LABELS},0),$S$2)*1,0)' for c in CATS[i:]]
+        return "=IF($S$2=0,0," + "+".join(parts) + ")"
+
+    def count(r, col, i):
+        return "=" + "+".join(f'COUNTIFS(Daten!$A:$A,$S$1,Daten!${col}:${col},"{c}")' for c in CATS[i:])
     first, fr, rows = soll_ist_table(ws, SI_HDR, soll, count)
 
     # Diagramme Reihe 1: Status
@@ -993,7 +978,7 @@ def build_district(ws, d, sheet_names):
         r = rows[cat]
         ch = verlauf_chart(tl_cats, rng(title, TL_LETTERS[0], r, TL_LETTERS[-1], r), rng(title, "B", r),
                            rng(title, HELP_LETTERS[0], r, HELP_LETTERS[-1], r), rng(title, T_SOLL, SI_HDR),
-                           title=cat, labels=True, legend=False)
+                           title=LEVEL_LABEL[cat], labels=True, legend=False)
         place(ws, ch, f"{anchors[k]}{R_CH3}", f"{anchors[k + 1]}{R_T1 - 2}")
 
     # Mitarbeiterliste
@@ -1150,10 +1135,10 @@ def build_soll_ist(ws, districts, dinfo, ymax):
 
     def g_sum(row, col):
         return "=" + "+".join(f"{quote_sheetname(g)}!${col}${row}" for g in gsheets)
-    soll = lambda r, cat: g_sum(dinfo["rows"][cat], T_SOLL)
     count_cols = {c: TL_LETTERS[k] for k, c in enumerate(TL_COLS)}
     count_cols[PLAN_COL] = T_PLAN
-    count = lambda r, col: g_sum(dinfo["rows"][CATS[r - TG_HDR - 1]], count_cols[col])
+    soll = lambda r, i: g_sum(dinfo["rows"][CATS[i]], T_SOLL)
+    count = lambda r, col, i: g_sum(dinfo["rows"][CATS[i]], count_cols[col])
     g_first, g_fr, g_rows = soll_ist_table(ws, TG_HDR, soll, count)
 
     # KPIs
@@ -1170,7 +1155,7 @@ def build_soll_ist(ws, districts, dinfo, ymax):
         ("Fachkräfte nach Plan", f"={T_PLAN}{g_fr}",
          f'=IF({T_SOLL}{g_fr}=0,"–",TEXT({T_PLAN}{g_fr}/{T_SOLL}{g_fr},"0%")&" des Solls")', C_PLAN),
         ("Lücke zum Soll", "=$S$6", "=$S$7", BAD_INK),
-        ("Über Soll (nach Plan)", "=$S$8", f'="davon Arbeiter LST: "&{T_PLAN}{arb}&" (Soll "&{T_SOLL}{arb}&")"', "EDA100"),
+        ("Über Soll (nach Plan)", "=$S$8", f'="davon Arbeiter LST: "&({T_PLAN}{arb}-{T_PLAN}{g_fr})', "EDA100"),
     ])
 
     # Tabelle je Bezirk (Fachkraefte)
@@ -1210,9 +1195,9 @@ def build_soll_ist(ws, districts, dinfo, ymax):
     for j, cat in enumerate(qcats):
         c_s = get_column_letter(4 + 2 * j)
         c_p = get_column_letter(5 + 2 * j)
-        put(ws, f"{c_s}{TQ_HDR}", f"{cat}\nSoll", f=font(9, True, INK2), fl=fill(HEAD_BG), al=CENTER_WRAP)
-        put(ws, f"{c_p}{TQ_HDR}", f"{cat}\nnach Plan", f=font(9, True, INK2), fl=fill(HEAD_BG), al=CENTER_WRAP)
-    ws.row_dimensions[TQ_HDR].height = 42
+        put(ws, f"{c_s}{TQ_HDR}", f"{LEVEL_LABEL[cat]}\nSoll", f=font(9, True, INK2), fl=fill(HEAD_BG), al=CENTER_WRAP)
+        put(ws, f"{c_p}{TQ_HDR}", f"{LEVEL_LABEL[cat]}\nnach Plan", f=font(9, True, INK2), fl=fill(HEAD_BG), al=CENTER_WRAP)
+    ws.row_dimensions[TQ_HDR].height = 54
     for i, d in enumerate(districts):
         r = TQ_FIRST + i
         g = quote_sheetname(gsheets[i])
