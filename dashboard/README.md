@@ -20,10 +20,10 @@ Zahlen und Diagramme automatisch an.
 G = Ziel-Qualifikation, J = Ist-Qualifikation, L–S = Stand je Qualifikation (Azubi … Teamleiter),
 U/V = örtliche Verwendungsprüfung Wmech/SigMech. „x“ = erledigt, Jahreszahl (z. B. 27) = geplant.
 
-## Status je Mitarbeiter
+## Status je Mitarbeiter (bezogen auf die Ziel-Qualifikation)
 
-1. **Fertig**: „x“ in der Ziel-Spalte, bei Wmech/SigMech auch „x“ bei der örtlichen Verwendungsprüfung
-   (oder Ist-Qualifikation = Ziel-Qualifikation)
+1. **Fertig**: „x“ in der Ziel-Spalte, bei Wmech/SigMech auch „x“ bei der örtlichen Verwendungsprüfung.
+   Ist-Qualifikation = Ziel-Qualifikation zählt nur als fertig, wenn in der Ziel-Spalte gar nichts steht.
 2. **Abschluss &lt;Jahr&gt;**: geplantes Jahr (das frühere aus Ziel-Spalte und Verwendungsprüfung), einzeln je Jahr ab dem Bezugsjahr
 3. **Überfällig**: das Jahr liegt vor dem Bezugsjahr, aber es steht noch kein „x“
 4. **Fehlt (nichts geplant)**: weder „x“ noch Jahr
@@ -32,9 +32,14 @@ U/V = örtliche Verwendungsprüfung Wmech/SigMech. „x“ = erledigt, Jahreszah
 ## Soll-Ist und Verlauf
 
 - Soll = Spalte „Zielzustand“ je Bezirk (Zeilen Arbeiter LST, Wmech, SigMech, SigMech RBEG, Teamleiter).
-- Ist zum Ende eines Jahres: Wer bis dahin fertig ist, zählt in seiner Ziel-Qualifikation, alle anderen in ihrer
-  Ist-Qualifikation (Azubis/Umschüler unter „Sonstige“). Überfällige zählen ab dem Bezugsjahr.
-- Fachkräfte = Wmech + SigMech + SigMech RBEG + Teamleiter. „Lücke zum Soll“ = Summe der Fehlmengen je Bezirk und Qualifikation.
+- Jeder Mitarbeiter zählt genau einmal – in seiner höchsten Qualifikation
+  (Teamleiter S > SigMech RBEG P > SigMech O > Wmech N > Arbeiter LST M), so wie die Spalte „IST Mrz.“ im Zielzustand.
+- Heute = höchste Spalte mit „x“ (Wmech/SigMech auch „x“ bei der Verwendungsprüfung U/V); ohne „x“ zählt die Ist-Qualifikation.
+- Verlauf: Zum Jahresende zählt die höchste Spalte mit „x“ oder geplantem Jahr bis dahin – auch über die Ziel-Qualifikation
+  hinaus. Überfällige Jahre zählen ab dem Bezugsjahr. „Nach Plan“ = alle eingetragenen Jahre erreicht.
+- Fachkräfte = Wmech + SigMech + SigMech RBEG + Teamleiter.
+- Lücke zum Soll = Soll-Stellen, die nicht besetzt werden können; höher Qualifizierte dürfen Stellen niedrigerer Qualifikation
+  besetzen. „Über Soll“ = Mitarbeiter, die für keine Soll-Stelle gebraucht werden.
 
 ## Neu erzeugen
 
