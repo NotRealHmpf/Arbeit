@@ -31,15 +31,17 @@ U/V = örtliche Verwendungsprüfung Wmech/SigMech. „x“ = erledigt, Jahreszah
 
 ## Soll-Ist und Verlauf
 
-- Jede Zeile zählt alle Mitarbeiter mit dieser **oder einer höheren** Qualifikation
-  (Teamleiter S > SigMech RBEG P > SigMech O > Wmech N > Arbeiter LST M). Ein SigMech RBEG zählt also auch bei SigMech.
-- Soll je Zeile = Spalte „Zielzustand“ dieser Zeile plus aller höheren Zeilen (z. B. SigMech: SigMech + SigMech RBEG + Teamleiter).
-- Heute = „x“ (Wmech/SigMech auch „x“ bei der Verwendungsprüfung U/V); ohne „x“ zählt die Ist-Qualifikation.
-- Verlauf: Zum Jahresende zählt „x“ oder ein geplantes Jahr bis dahin – auch über die Ziel-Qualifikation hinaus.
+- Jeder Mitarbeiter zählt genau einmal – auf der Stufe, die er erreicht hat. Die Stufen laufen von links nach rechts:
+  Azubi (L) → Arbeiter LST (M) → Wmech (N) → SigMech (O) → SigMech RBEG (P) → Teamleiter (S).
+  Wer SigMech RBEG wird, zählt nicht mehr als SigMech.
+- Heute = rechteste Spalte mit „x“ (Wmech/SigMech auch „x“ bei der Verwendungsprüfung U/V); ohne „x“ zählt die Ist-Qualifikation.
+- Verlauf: Zum Jahresende zählt die rechteste Spalte mit „x“ oder einem geplanten Jahr bis dahin. Standard: höchstens bis zur
+  Ziel-Qualifikation (Spalte G); mit Einstellungen!C5 = „Ja“ zählen auch Planjahre darüber hinaus.
   Überfällige Jahre zählen ab dem Bezugsjahr. „Nach Plan“ = alle eingetragenen Jahre erreicht.
-- Fachkräfte = Wmech und höher.
-- Lücke zum Soll = größte Fehlmenge über alle Zeilen (Stellen, die nicht besetzt werden können).
-  „Über Soll“ = Mitarbeiter, die für keine Soll-Stelle gebraucht werden.
+- Soll = Spalte „Zielzustand“ je Bezirk.
+- Passend besetzt = Ziel-Stellen, auf denen jemand mit genau dieser Qualifikation sitzt (je Stufe höchstens so viele wie im Soll).
+  Fehlende Ziel-Stellen = Soll − passend besetzt. Mehr als Soll = Mitarbeiter auf Stufen, die schon voll sind.
+- Diagramm „Mitarbeiter je Stufe“: gestapelt je Jahr, rechts daneben der Zielzustand.
 
 ## Neu erzeugen
 
