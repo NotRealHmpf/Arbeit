@@ -848,7 +848,8 @@ def build_data(ws, districts):
             idx = f"${DC['row']}{r}-{SRC_FIRST_ROW - 1}"
 
             def src(col):
-                return f"INDEX({s}!${col}${SRC_FIRST_ROW}:${col}${SRC_LAST_ROW},{idx})"
+                # IFERROR: werden im Bezirks-Blatt Zeilen geloescht, wird der Bereich kuerzer -> leer statt Fehler
+                return f'IFERROR(INDEX({s}!${col}${SRC_FIRST_ROW}:${col}${SRC_LAST_ROW},{idx}),"")'
             ok = c["ok"]
             f = {
                 "bez": d.sheet,
@@ -863,8 +864,10 @@ def build_data(ws, districts):
                 "zvp": f'=IF({c["zmap"]}=0,0,IFERROR(INDEX({E_MAP_VPNO},{c["zmap"]})*1,0))',
                 "zgrp": (f'=IF({c["zmap"]}=0,"{GROUP_OTHER}",IF(ISNUMBER(MATCH(INDEX({E_MAP_GRP},{c["zmap"]})&"",'
                          f'{{{",".join(chr(34) + g + chr(34) for g in CMP)}}},0)),INDEX({E_MAP_GRP},{c["zmap"]})&"","{GROUP_OTHER}"))'),
-                "zent": (f'=IF({c["zcol"]}=0,"",TRIM(INDEX({s}!$L${SRC_FIRST_ROW}:$S${SRC_LAST_ROW},{idx},{c["zcol"]})&""))'),
-                "vpent": (f'=IF({c["zvp"]}=0,"",TRIM(INDEX({s}!$U${SRC_FIRST_ROW}:$V${SRC_LAST_ROW},{idx},{c["zvp"]})&""))'),
+                "zent": (f'=IF({c["zcol"]}=0,"",TRIM(IFERROR(INDEX({s}!$L${SRC_FIRST_ROW}:$S${SRC_LAST_ROW},{idx},'
+                         f'{c["zcol"]}),"")&""))'),
+                "vpent": (f'=IF({c["zvp"]}=0,"",TRIM(IFERROR(INDEX({s}!$U${SRC_FIRST_ROW}:$V${SRC_LAST_ROW},{idx},'
+                          f'{c["zvp"]}),"")&""))'),
                 "zyear": f'=IF({year9(c["zent"])}=9999,"",{year9(c["zent"])})',
                 "done": f'=IF(OR(LOWER({c["zent"]})="x",LOWER({c["vpent"]})="x"),1,0)',
                 "stat": (f'=IF({ok}=0,"",IF({c["zcol"]}=0,9,IF({c["done"]}=1,1,IF({c["zyear"]}="",8,'
