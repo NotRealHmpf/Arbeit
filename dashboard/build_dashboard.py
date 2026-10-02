@@ -1,13 +1,15 @@
-"""Erzeugt aus Bedarf_Bestand_LST und LST_Zielzustand_gesamt eine Datei mit Excel-Dashboard.
+"""Erzeugt aus Bedarf_Bestand_LST und LST_Zielzustand_gesamt eine Kopie mit Excel-Dashboard.
 
     python build_dashboard.py <Bedarf_Bestand_LST.xlsx> <LST_Zielzustand_gesamt.xlsx> <ausgabe.xlsx>
 
 Ablauf:
-  1. Bezirks-Blaetter erkennen (Kopfzeile mit "Ziel-Qualifikation") und dem Zielzustand zuordnen
-  2. build_sheets.py      - neue Blaetter (Uebersicht, Soll-Ist, Grafik je Bezirk, Daten, Zielzustand, Einstellungen)
-  3. merge_into_original  - Blaetter in die Original-Datei einsetzen (Original-Blaetter bleiben unveraendert)
-  4. LibreOffice          - Kopie durchrechnen, um die Ergebnisse zu pruefen
+  1. Bezirks-Blaetter pruefen (Kopfzeile 1 oder 2, Ueberschriften der verwendeten Spalten) und dem Zielzustand zuordnen
+  2. build_sheets.py      - neue Blaetter (Uebersicht, Soll-Ist, Dashboard je Bezirk, Pruefliste, Zielzustand,
+                            Einstellungen, Daten)
+  3. merge_into_original  - Blaetter direkt in das .xlsx-Paket des Originals einsetzen (Original-Blaetter bleiben unveraendert)
+  4. LibreOffice          - Kopie durchrechnen; keine Fehlerwerte in den neuen Blaettern
   5. inject_cache         - berechnete Werte in Zellen und Diagrammen speichern
+Die Ergebnisse prueft verify.py gegen die unabhaengige Nachrechnung in reference.py.
 Benoetigt: openpyxl, lxml, LibreOffice (soffice) mit Calc.
 """
 import math
@@ -17,22 +19,31 @@ import shutil
 import subprocess
 import sys
 import tempfile
+from datetime import date
 from pathlib import Path
 
 from openpyxl import load_workbook
 
-from build_sheets import SRC_FIRST_ROW, SRC_ROWS, District, build
+from build_sheets import HEADER_PREFIX, HEADERS, District, build
 from inject_cache import ERRORS, inject
 from merge_into_original import merge
+from reference import compute
 
-EXCLUDE = {"Bezirksleiter FBÜW"}
-# Blattname in Bedarf_Bestand_LST -> Bezirk im Zielzustand (sonst gleicher Name)
-ZZ_NAMES = {
-    "Limburg (KRM)": "Limburg 1 (SFS KC)",   # Bezirk im Blatt: "Limburg SFS"
-    "Limburg 2": "Limburg 2",
-    "FFM West": "FFM West/Höchst",
-    "FFM FA": "FFM Abstellbahnhof",
-}
+# Blatt in Bedarf_Bestand_LST -> Bezirk im Zielzustand (Zeile 1) -> erwartete Spalte "Zielzustand"
+DISTRICTS = [
+    ("Limburg (KRM)", "Limburg 1 (SFS KC)", "K"),
+    ("Limburg 2", "Limburg 2", "O"),
+    ("FFM West", "FFM West/Höchst", "S"),
+    ("FFM Süd", "FFM Süd", "W"),
+    ("FFM FA", "FFM Abstellbahnhof", "AA"),
+    ("FFM Hbf", "FFM Hbf", "AE"),
+    ("Aschaffenburg", "Aschaffenburg", "AI"),
+    ("Hanau", "Hanau", "AM"),
+    ("Wetzlar", "Wetzlar", "AQ"),
+    ("Gießen", "Gießen", "AU"),
+    ("Wetterau", "Wetterau", "AY"),
+    ("Gelnhausen", "Gelnhausen", "BC"),
+]
 
 MACRO = """<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE script:module PUBLIC "-//OpenOffice.org//DTD OfficeDocument 1.0//EN" "module.dtd">
@@ -61,50 +72,50 @@ def libreoffice_recalc(path, timeout=900):
             raise RuntimeError("LibreOffice hat die Datei nicht neu berechnet.")
 
 
-def find_districts(src_wb, zz_ws):
-    """Bezirks-Blaetter = Blaetter mit "Ziel-Qualifikation" in Spalte G der ersten Zeilen."""
-    zz_names = {str(c.value).strip() for c in zz_ws[1] if c.value}
+def check_districts(src_wb, zz_ws):
+    """Blaetter und Ueberschriften pruefen, Zuordnung zum Zielzustand kontrollieren."""
+    zz_col = {str(c.value).strip(): c.column_letter for c in zz_ws[1] if c.value}
     out = []
-    for ws in src_wb.worksheets:
-        if ws.title in EXCLUDE:
-            continue
-        if not any(str(ws.cell(r, 7).value or "").strip() == "Ziel-Qualifikation" for r in range(1, 4)):
-            continue
-        name = ZZ_NAMES.get(ws.title, ws.title)
-        if name not in zz_names:
-            print(f"Hinweis: Kein Bezirk „{name}“ im Zielzustand – Soll für „{ws.title}“ bleibt leer (Einstellungen).")
-            name = ""
-        out.append(District(ws.title, name))
+    for sheet, zz_name, zz_letter in DISTRICTS:
+        if sheet not in src_wb.sheetnames:
+            raise RuntimeError(f"Blatt „{sheet}“ fehlt in Bedarf_Bestand_LST.")
+        ws = src_wb[sheet]
+        hdr = next((r for r in (1, 2, 3) if str(ws[f"B{r}"].value or "").strip() == "Name"), None)
+        if hdr is None:
+            raise RuntimeError(f"„{sheet}“: keine Kopfzeile mit „Name“ in Spalte B gefunden.")
+        wrong = [f"{c}{hdr}={ws[f'{c}{hdr}'].value!r} (erwartet {t!r})" for c, t in HEADERS.items()
+                 if str(ws[f"{c}{hdr}"].value or "").strip() != t]
+        wrong += [f"{c}{hdr}={ws[f'{c}{hdr}'].value!r} (erwartet „{t}…“)" for c, t in HEADER_PREFIX.items()
+                  if not str(ws[f"{c}{hdr}"].value or "").startswith(t)]
+        if wrong:
+            raise RuntimeError(f"„{sheet}“: Spalten passen nicht: {'; '.join(wrong)}")
+        if zz_name not in zz_col:
+            raise RuntimeError(f"Bezirk „{zz_name}“ fehlt in Zeile 1 des Zielzustands.")
+        idx = zz_ws[zz_col[zz_name] + "1"].column + 3
+        letter = zz_ws.cell(2, idx).column_letter
+        if letter != zz_letter or str(zz_ws.cell(2, idx).value).strip() != "Zielzustand":
+            raise RuntimeError(f"Zielzustand „{zz_name}“: Spalte {letter} statt {zz_letter} oder keine Überschrift „Zielzustand“.")
+        out.append(District(sheet, zz_name))
     return out
 
 
-def chart_ymax(src_wb, zz_ws, districts):
-    """Gemeinsame Skala fuer die kleinen Verlaufsdiagramme: max(Mitarbeiter, Soll) je Bezirk + Luft."""
-    col_of = {str(c.value).strip(): c.column for c in zz_ws[1] if c.value}
-    labels = {str(zz_ws.cell(r, 1).value or "").strip(): r for r in range(1, zz_ws.max_row + 1)}
+def chart_ymax(ref):
+    """Gemeinsame Skala der kleinen Verlaufsdiagramme (Soll-Ist): hoechste Saeule (inkl. Teamleiter) bzw. Soll + Luft."""
     top = 0
-    for d in districts:
-        ws = src_wb[d.sheet]
-        staff = sum(1 for r in range(SRC_FIRST_ROW, SRC_FIRST_ROW + SRC_ROWS)
-                    if ws.cell(r, 2).value and str(ws.cell(r, 2).value).strip() != "Name"
-                    and (ws.cell(r, 7).value or ws.cell(r, 10).value))
-        soll = 0
-        if d.zz_name in col_of:
-            c = col_of[d.zz_name] + 3
-            for cat in ("Wmech", "SigMech", "SigMech RBEG", "Teamleiter"):
-                v = zz_ws.cell(labels.get(cat, 0) or 1, c).value
-                soll += v if isinstance(v, (int, float)) else 0
-        top = max(top, staff, soll)
+    for d in ref["districts"].values():
+        for row in d["counts"].values():
+            top = max(top, sum(v for k, v in row.items()))
+        top = max(top, sum(d["soll"].values()))
     return int(math.ceil(top * 1.15 / 5.0) * 5)
 
 
-def main(src, zz_path, out):
+def main(src, zz_path, out, keep_calc=None):
     src_wb = load_workbook(src, data_only=True)
-    zz_wb = load_workbook(zz_path)
-    zz_ws = zz_wb.worksheets[0]
+    zz_ws = load_workbook(zz_path).worksheets[0]
     zz_vals = load_workbook(zz_path, data_only=True).worksheets[0]
-    districts = find_districts(src_wb, zz_ws)
-    ymax = chart_ymax(src_wb, zz_vals, districts)
+    districts = check_districts(src_wb, zz_vals)
+    ref = compute(src, zz_path, [(d.sheet, d.zz_name) for d in districts], date.today().year)
+    ymax = chart_ymax(ref)
     with tempfile.TemporaryDirectory(prefix="dashboard-") as tmp:
         new = os.path.join(tmp, "neue_blaetter.xlsx")
         merged = os.path.join(tmp, "merged.xlsx")
@@ -114,18 +125,18 @@ def main(src, zz_path, out):
         merge(src, new, merged)
         shutil.copy(merged, calc)
         libreoffice_recalc(calc)
-        # Pruefen: keine Fehlerwerte in den neuen Blaettern
         wb = load_workbook(calc, data_only=True)
         errors = [f"{n}!{c.coordinate}" for n in sheet_names for row in wb[n].iter_rows() for c in row
                   if isinstance(c.value, str) and c.value in ERRORS]
         if errors:
-            raise RuntimeError(f"Formelfehler in den neuen Blättern: {errors[:20]}")
+            raise RuntimeError(f"Formelfehler in den neuen Blättern ({len(errors)}): {errors[:20]}")
         info = inject(merged, calc, out, sheet_names)
-        if os.environ.get("KEEP_CALC"):
-            shutil.copy(calc, os.environ["KEEP_CALC"])
+        if keep_calc:
+            shutil.copy(calc, keep_calc)
     print(f"{len(districts)} Bezirke, {len(sheet_names)} neue Blätter, {info['cells']} Formelzellen, "
           f"{info['charts']} Diagramme -> {out}")
+    return districts
 
 
 if __name__ == "__main__":
-    main(sys.argv[1], sys.argv[2], sys.argv[3])
+    main(sys.argv[1], sys.argv[2], sys.argv[3], os.environ.get("KEEP_CALC"))
