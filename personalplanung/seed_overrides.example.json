@@ -1,0 +1,5 @@
+{
+  "team": {"Nachname A": "Blau"},
+  "funktion": {"Nachname B": "Reserve"},
+  "zusatz": {"Nachname C": ["AV", "TVT-Fahrer", "Handwerker", "Ersthelfer"]}
+}
