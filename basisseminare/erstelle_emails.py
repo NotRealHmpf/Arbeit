@@ -441,10 +441,17 @@ def zuordnen(bedarfe, alle_bedarfe, fp_zeilen, personen, manuell):
     for z in fp_zeilen:
         nach_oe[z.oe].append(z)
 
-    # Vorgesetzte je OE (alle Bedarfe, je Mitarbeiter einmal) – Indiz für Klärfälle
-    vg_je_oe = defaultdict(Counter)
-    for (oe, _, _), vg in {(b.oe, b.name, b.vorname): b.vg for b in alle_bedarfe}.items():
-        vg_je_oe[oe][vg or "kein Eintrag"] += 1
+    # Vorgesetzte je OE (alle Bedarfe, je Mitarbeiter einmal) – Indiz für Klärfälle.
+    # Wer bei sich selbst als Vorgesetzter steht, zählt nicht mit (leitet die OE vermutlich).
+    erste = {}
+    for b in alle_bedarfe:
+        erste.setdefault((b.oe, b.name, b.vorname), b)
+    vg_je_oe, selbst = defaultdict(Counter), {}
+    for b in erste.values():
+        if b.vg and schreibform(b.vg) == schreibform(f"{b.vorname} {b.name}"):
+            selbst[(b.oe, schreibform(b.vg))] = b.zeile
+        else:
+            vg_je_oe[b.oe][b.vg or "kein Eintrag"] += 1
 
     ergebnisse = []
     for b in bedarfe:
@@ -498,17 +505,20 @@ def zuordnen(bedarfe, alle_bedarfe, fp_zeilen, personen, manuell):
                 e.hinweise.append(f"Kein Feinplaner für {fk.anzeige} gefunden – Cc bitte ergänzen")
 
         if e.status == "Klärfall":
-            e.vorschlaege = vorschlaege(b, vg, zeilen, fp_zeilen, vg_je_oe)
-            andere = vg_je_oe[b.oe]
-            e.indiz = (f"Vorgesetzte aller Mitarbeiter der OE {oe} im Kundenbedarf: "
-                       + ", ".join(f"{k} ({v} MA)" for k, v in andere.most_common()))
+            e.vorschlaege = vorschlaege(b, vg, zeilen, fp_zeilen, vg_je_oe, selbst)
+            e.indiz = (f"Im Kundenbedarf eingetragene Vorgesetzte in der OE {oe}: "
+                       + (", ".join(f"{k} ({v} MA)" for k, v in vg_je_oe[b.oe].most_common()) or "–"))
         e.bl_text = bl_text
         ergebnisse.append(e)
     return ergebnisse
 
 
-def vorschlaege(b, vg, zeilen, alle_zeilen, vg_je_oe):
-    """Mögliche Empfänger für einen Klärfall – mit Herkunft, damit man selbst entscheiden kann."""
+def vorschlaege(b, vg, zeilen, alle_zeilen, vg_je_oe, selbst):
+    """Mögliche Empfänger für einen Klärfall – mit Herkunft, damit man selbst entscheiden kann.
+
+    Reihenfolge: Vorgesetzter laut Kundenbedarf, Bezirksleiter der OE laut Feinplaner-Liste,
+    zuletzt Personen, die nur in Zeilen mit Einsatzort „Bezirksleiter“ stehen (vermutlich übergeordnet).
+    """
     oe = oe_kurz(b.abt)
     out = []
     if vg is not None:
@@ -522,13 +532,16 @@ def vorschlaege(b, vg, zeilen, alle_zeilen, vg_je_oe):
             info = "steht nicht in der Feinplaner-Liste" + (
                 f"; Feinplaner der OE {oe} laut Liste: {namen(cc)}" if cc else "")
         anzahl, gesamt = vg_je_oe[b.oe].get(b.vg, 0), sum(vg_je_oe[b.oe].values())
-        out.append({"an": vg.anzeige, "cc": [p.anzeige for p in cc],
-                    "quelle": f"Vorgesetzter laut Kundenbedarf (bei {anzahl} von {gesamt} Mitarbeitern der OE {oe} "
-                              f"so eingetragen); {info}"})
+        text = f"Vorgesetzter laut Kundenbedarf (bei {anzahl} von {gesamt} Mitarbeitern der OE {oe} so eingetragen"
+        z_selbst = selbst.get((b.oe, schreibform(b.vg)))
+        if z_selbst:
+            text += (f", ohne {vg.anzeige} selbst); {vg.anzeige} steht im Kundenbedarf bei sich selbst als "
+                     f"Vorgesetzter (Z. {z_selbst}) und leitet die OE daher vermutlich")
+        else:
+            text += ")"
+        out.append({"an": vg.anzeige, "cc": [p.anzeige for p in cc], "quelle": f"{text}; {info}"})
     gesehen = {vg.pid} if vg is not None else set()
     for regulaer in (True, False):
-        if not regulaer and out:      # „Bezirksleiter“-Zeilen nur, wenn es sonst keinen Vorschlag gibt
-            break
         for z in zeilen:
             if z.ist_bl_zeile == regulaer:
                 continue
@@ -537,10 +550,16 @@ def vorschlaege(b, vg, zeilen, alle_zeilen, vg_je_oe):
                     continue
                 gesehen.add(p.pid)
                 eigene = [y for y in zeilen if p in y.bl and y.ist_bl_zeile != regulaer]
-                art = "Bezirksleiter" if regulaer else "Eintrag in Zeile „Bezirksleiter“ (vermutlich übergeordnet)"
+                je_ort = {}
+                for y in eigene:
+                    je_ort.setdefault(y.ort, [])
+                    je_ort[y.ort] = eindeutig(je_ort[y.ort] + y.fp)
+                art = "Bezirksleiter" if regulaer else "nur in Zeile „Bezirksleiter“ eingetragen (vermutlich übergeordnet)"
+                anteil = f"{sum(p in y.bl for y in zeilen)} von {len(zeilen)} Zeilen"
                 out.append({"an": p.anzeige, "cc": [x.anzeige for x in fp_aus(eigene)],
-                            "quelle": f"{art} laut Feinplaner-Liste für OE {oe}: " + "; ".join(
-                                f"{y.ort} → FP {namen(y.fp) or '–'}" for y in eigene)})
+                            "quelle": f"{art} laut Feinplaner-Liste für OE {oe} ({anteil}): " + "; ".join(
+                                f"{ort} → FP {', '.join(x.anzeige for x in fps) or '–'}"
+                                for ort, fps in je_ort.items())})
     return out
 
 
@@ -797,14 +816,14 @@ def seite_html(emails, gruppen, plaetze, stats, args):
     # Plätze vs. Bedarf
     a("<h2>Plätze und Bedarfe je Basisseminar</h2><div class='card wrap'><table class='list'><tr><th>Basisseminar</th>"
       "<th>PS-Nr.</th><th>Termine</th><th class='num'>Plätze</th><th class='num'>Bedarfe in E-Mails</th>"
-      "<th class='num'>Bedarfe Klärfall</th><th class='num'>Bedarfe gesamt</th></tr>")
+      "<th class='num'>Bedarfe Klärfall</th><th class='num'>Bedarfe gesamt</th><th>Angeboten an</th></tr>")
     for r in stats["plaetze_bedarf"]:
         over = " class='num over'" if r["gesamt"] > r["plaetze"] else " class='num'"
         a(f"<tr><td>{esc(r['titel'])}</td><td>{esc(r['ps'])}</td><td>{esc(r['termine'])}</td>"
           f"<td class='num'>{r['plaetze']}</td><td class='num'>{r['eindeutig']}</td><td class='num'>{r['klaer']}</td>"
-          f"<td{over}>{r['gesamt']}</td></tr>")
-    a("</table><p class='muted' style='font-size:13px;margin:8px 0 0'>Fett/rot: mehr Bedarfe als Plätze – "
-      "die Plätze gehen an die zuerst eingehenden Buchungen.</p></div>")
+          f"<td{over}>{r['gesamt']}</td><td>{esc(', '.join(r['an'])) or '–'}</td></tr>")
+    a("</table><p class='muted' style='font-size:13px;margin:8px 0 0'>Rot: mehr Bedarfe als Plätze. "
+      "Dieselben Plätze (TNP) stehen in den E-Mails aller unter „Angeboten an“ genannten Führungskräfte.</p></div>")
 
     # E-Mails
     a("<h2>E-Mails</h2><div class='card'><ol class='toc'>")
@@ -895,9 +914,14 @@ def schreibe_excel(pfad, emails, gruppen, plaetze, bedarfe, ergebnisse, personen
           [5, 7, 11, 15, 10, 20, 40, 17, 17, 12, 12, 15, 10, 55])
 
     blatt(wb, "Plätze vs. Bedarf", ["PS-Nr.", "Titel", "Termine", "Plätze", "Bedarfe in E-Mails", "Bedarfe Klärfall",
-                                    "Bedarfe gesamt"],
-          [[r["ps"], r["titel"], r["termine"], r["plaetze"], r["eindeutig"], r["klaer"], r["gesamt"]]
-           for r in stats["plaetze_bedarf"]], [11, 32, 60, 8, 12, 12, 12], wrap="C")
+                                    "Bedarfe gesamt", "Angeboten an"],
+          [[r["ps"], r["titel"], r["termine"], r["plaetze"], r["eindeutig"], r["klaer"], r["gesamt"], ", ".join(r["an"])]
+           for r in stats["plaetze_bedarf"]], [11, 32, 60, 8, 12, 12, 12, 50], wrap="CH")
+
+    blatt(wb, "Basisqualifikationen", ["Zeile Kundenbedarf", "Name", "Vorname", "Abt.", "PS-Nr.", "Titel", "Dringlichkeit",
+                                       "Vorgesetzter (Kundenbedarf)"],
+          [[b.zeile, b.name, b.vorname, b.abt, b.ps, b.titel, b.dringlichkeit, b.vg or "(leer)"] for b in stats["bq"]],
+          [10, 16, 14, 22, 11, 50, 34, 22])
 
     blatt(wb, "Namensabgleich", ["Person (so verwendet)", "Schreibweisen", "Fundstellen"],
           [[p.anzeige, "\n".join(p.varianten()),
@@ -949,7 +973,8 @@ def main():
         termine = "; ".join(f"{tn}: {fmt_dt(min(p.anfang for p in pl if p.terminnr == tn))[:10]} "
                             f"({sum(p.terminnr == tn for p in pl)} Pl.)" for tn in eindeutig(p.terminnr for p in pl))
         r = {"ps": ps, "titel": pl[0].titel, "plaetze": len(pl), "termine": termine,
-             "eindeutig": sum(b.ps == ps for b in in_mails), "klaer": sum(b.ps == ps for b in klaer)}
+             "eindeutig": sum(b.ps == ps for b in in_mails), "klaer": sum(b.ps == ps for b in klaer),
+             "an": [em.an.anzeige for em in emails if ps in em.bedarfe]}
         r["gesamt"] = r["eindeutig"] + r["klaer"]
         plaetze_bedarf.append(r)
 
@@ -965,11 +990,14 @@ def main():
     if sonder:
         hinweise.append("Dringlichkeit ohne Stufe 1–3 wie in der Quelle übernommen: "
                         + ", ".join(f"„{k}“ {v}×" for k, v in sonder.items()) + ".")
-    bq = Counter(f"{b.titel} ({b.ps})" for b in alle_bedarfe if "-BQ-" in b.produkt.upper()
-                 or b.titel.lower().startswith("basisqualifikation"))
+    bq = [b for b in alle_bedarfe if "-BQ-" in b.produkt.upper() or b.titel.lower().startswith("basisqualifikation")]
     if bq:
+        je_titel = defaultdict(list)
+        for b in sorted(bq, key=lambda b: (norm(b.name), norm(b.vorname))):
+            je_titel[f"{b.titel} ({b.ps})"].append(f"{b.name} {b.vorname} ({b.dringlichkeit[:1] or '–'})")
         hinweise.append("Bedarfe zu Basisqualifikationen (A-BQ-…) sind ein anderes Produkt als das Basisseminar und "
-                        "wurden nicht zugeordnet: " + ", ".join(f"{k} {v}×" for k, v in sorted(bq.items())) + ".")
+                        "wurden nicht zugeordnet (in Klammern die Dringlichkeit): "
+                        + "; ".join(f"{k}: {', '.join(v)}" for k, v in sorted(je_titel.items())) + ".")
     gleich = [p for p in personen.liste if p.varianten()]
     if gleich:
         hinweise.append("Als gleiche Person gewertet (Schreibweisen): " + "; ".join(
@@ -979,7 +1007,7 @@ def main():
              "ma_in_mails": len(eindeutig(b.ma for b in in_mails)), "ma_klaer": len(eindeutig(b.ma for b in klaer)),
              "plaetze_ok": sum(len(v) for v in plaetze_je_ps.values()),
              "plaetze_raus": sum(1 for p in plaetze if p.grund),
-             "plaetze_bedarf": plaetze_bedarf, "hinweise": hinweise}
+             "plaetze_bedarf": plaetze_bedarf, "hinweise": hinweise, "bq": bq}
 
     aus = Path(args.ausgabe)
     aus.mkdir(parents=True, exist_ok=True)
