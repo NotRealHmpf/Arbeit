@@ -28,6 +28,8 @@ Block je Seminar.
 4. **Feinplaner (Cc):**
    - Steht der Mitarbeiter auf genau einem Feinplaner-Blatt, ist das sein Feinplaner.
    - Sonst gilt die Feinplaner-Liste für OE und Führungskraft (normale Zeilen vor Zeilen mit Einsatzort „Bezirksleiter“).
+   - Hat ein Feinplaner ein eigenes Blatt, auf dem kein Mitarbeiter der OE steht, obwohl laut Übersicht welche im
+     Zeitraum des Blatts fällig sind, betreut er die OE offenbar nicht und scheidet aus (mit Prüfhinweis).
    - Mehrere Kandidaten werden über die Übersicht eingegrenzt: Blätter anderer Mitarbeiter derselben OE oder
      Bemerkungen wie „kommt noch laut <Vorname des Feinplaners>“.
    - Was mehrdeutig bleibt, kommt komplett in Cc und bekommt einen Prüfhinweis.

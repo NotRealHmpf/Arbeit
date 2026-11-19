@@ -381,16 +381,42 @@ class UVVZeile:
     oe: str
     fk: object                  # Verantw. Führungskraft (Person)
     bemerkung: str
+    gueltig_bis: object = None  # UVV gültig bis (für den Zeitraum eines Feinplaner-Blatts)
+
+
+@dataclass
+class Wechsel:
+    """Feinplaner-Blätter nennen für eine ganze OE eine andere Führungskraft als die Übersicht."""
+    neu: object
+    alt: object
+    blatt: str
+    oe: str                     # zur Anzeige
+    anzahl: int                 # Zeilen der OE auf dem Blatt mit der neuen Führungskraft
+    gesamt: int                 # Mitarbeiter der OE laut Übersicht
+    notiz: str                  # Bemerkungen dieser Zeilen
+    blattnotiz: str             # freie Notizen auf dem Blatt
+
+    def text(self):
+        belege = [f"Spalte „Verantw. Führungskraft“ bei {self.anzahl} von {self.gesamt} Mitarbeitern der OE"]
+        if self.blattnotiz:
+            belege.append(f"Blattnotiz „{self.blattnotiz}“")
+        if self.notiz:
+            belege.append(f"Bemerkung „{self.notiz}“")
+        return (f"Führungswechsel OE {self.oe} laut Feinplaner-Blatt „{self.blatt}“: {self.neu.anzeige} "
+                f"({'; '.join(belege)}); die UVV-Übersicht nennt noch {self.alt.anzeige}")
 
 
 @dataclass
 class UVVInfo:
     fk: object = None           # aktuelle Führungskraft
     fk_quelle: str = ""
-    fk_alt: object = None       # abweichende Führungskraft laut Übersicht (z. B. vor einem Wechsel)
+    fk_alt: object = None       # abweichende Führungskraft laut Übersicht
     fk_notiz: str = ""
+    wechsel: object = None      # Führungswechsel der OE (Wechsel)
+    abgeleitet: bool = False    # Führungskraft nur aus den übrigen Mitarbeitern der OE abgeleitet
     fps: list = field(default_factory=list)        # Feinplaner, auf deren Blatt der Mitarbeiter steht
     blaetter: list = field(default_factory=list)
+    blatt_bemerkung: dict = field(default_factory=dict)
     bemerkungen: list = field(default_factory=list)
     abt: str = ""
 
@@ -406,7 +432,10 @@ class UVV:
         self.fp_je_oe = defaultdict(Counter)     # OE -> Feinplaner der Blätter (Anzahl Zeilen)
         self.laut_je_oe = defaultdict(Counter)   # OE -> Feinplaner aus Bemerkungen „laut …“
         self.laut_belege = defaultdict(list)     # (OE, pid) -> Bemerkungen
-        self.fk_wechsel = {}                     # OE -> (neue FK, alte FK, Notiz, Blatt)
+        self.fk_wechsel = {}                     # OE -> Wechsel
+        self.zeilen_je_blatt = defaultdict(list)  # Blatttitel -> [UVVZeile]
+        self.master_je_oe = defaultdict(list)    # OE -> [UVVZeile] der Übersicht
+        self.blatt_notizen = defaultdict(list)   # Blatttitel -> freie Notizen (Zeilen ohne Mitarbeiter)
 
     def info(self, b):
         key = schreibform(f"{b.name} {b.vorname}")
@@ -423,13 +452,15 @@ class UVV:
         i = UVVInfo(abt=m.abt if m else bl[0][1].abt)
         i.fps = eindeutig(fp for fp, _ in bl if fp)
         i.blaetter = eindeutig(z.blatt for _, z in bl)
+        i.blatt_bemerkung = {z.blatt: z.bemerkung for _, z in bl if z.bemerkung}
         i.bemerkungen = eindeutig(z.bemerkung for z in ([m] if m else []) + [z for _, z in bl] if z.bemerkung)
         fk_blatt = eindeutig(z.fk for _, z in bl if z.fk)
-        wechsel = self.fk_wechsel.get(oe)
-        if wechsel and (not fk_blatt or fk_blatt == [wechsel[0]]):
-            # Führungswechsel für die ganze OE (einheitlicher Hinweis für alle Mitarbeiter der OE)
-            i.fk, i.fk_alt, i.fk_notiz, blatt, _ = wechsel
-            i.fk_quelle = f"Feinplaner-Blatt „{blatt}“"
+        w = self.fk_wechsel.get(oe)
+        if w and (not fk_blatt or fk_blatt == [w.neu]):
+            # Führungswechsel der ganzen OE; wer nicht auf dem Blatt steht, bekommt ihn abgeleitet
+            i.fk, i.fk_alt, i.wechsel, i.abgeleitet = w.neu, w.alt, w, not fk_blatt
+            i.fk_quelle = (f"Feinplaner-Blatt „{w.blatt}“" if fk_blatt
+                           else f"Feinplaner-Blatt „{w.blatt}“ (übrige Mitarbeiter der OE)")
         elif len(fk_blatt) == 1:
             i.fk, i.fk_quelle = fk_blatt[0], "Feinplaner-Blatt " + ", ".join(f"„{x}“" for x in i.blaetter)
             if m and m.fk and m.fk is not i.fk:
@@ -445,6 +476,24 @@ class UVV:
             if ABWESEND.search(z.bemerkung):
                 return z.bemerkung
         return ""
+
+    def nicht_zustaendig(self, fp, oe):
+        """Hat der Feinplaner ein eigenes Blatt, auf dem kein Mitarbeiter der OE steht, obwohl laut Übersicht
+        Mitarbeiter der OE im Zeitraum des Blatts fällig sind, betreut er die OE offenbar nicht.
+        Liefert dann einen solchen Mitarbeiter als Beleg, sonst ''."""
+        titel = [k for k, p in self.blatt_fp.items() if p is fp]
+        if not titel or self.fp_je_oe.get(oe, Counter()).get(fp, 0):
+            return ""
+        daten = [z.gueltig_bis for k in titel for z in self.zeilen_je_blatt[k] if z.gueltig_bis]
+        if not daten:
+            return ""
+        von, bis = min(daten), max(daten)
+        faellig = sorted((z for z in self.master_je_oe.get(oe, []) if z.gueltig_bis and von <= z.gueltig_bis <= bis),
+                         key=lambda z: z.gueltig_bis)
+        if not faellig:
+            return ""
+        return (f"auf dem Blatt „{', '.join(titel)}“ (UVV fällig {von:%d.%m.%Y}–{bis:%d.%m.%Y}) steht kein Mitarbeiter "
+                f"der OE, obwohl z. B. {faellig[0].name} ({faellig[0].gueltig_bis:%d.%m.%Y}) in den Zeitraum fällt")
 
 
 def fp_aus_blattname(titel, fp_personen):
@@ -474,10 +523,14 @@ def lies_uvv(pfad, personen, fp_personen):
         if not ist_master:
             uvv.blatt_fp[titel] = fp
         i_name, i_abt, i_fk = (kopf.index(s) for s in UVV_SPALTEN)
+        i_gb = kopf.index("Gültig bis") if "Gültig bis" in kopf else None
         i_rest = kopf.index("Resttage") if "Resttage" in kopf else max(i_name, i_abt, i_fk)
         for nr, werte in enumerate(ws.iter_rows(min_row=kopf_nr + 1, values_only=True), kopf_nr + 1):
             name = t(werte[i_name]) if i_name < len(werte) else ""
             if "," not in name:
+                notiz = " ".join(t(v) for v in werte if t(v) and not hasattr(v, "strftime"))
+                if notiz and not ist_master and re.search(r"[a-zäöü]{4}", notiz, re.I):
+                    uvv.blatt_notizen[titel].append(notiz)          # freie Notiz auf dem Feinplaner-Blatt
                 continue
             bem = " / ".join(v.strftime("%d.%m.%Y") if hasattr(v, "strftime") else t(v)
                              for j, v in enumerate(werte)
@@ -486,15 +539,18 @@ def lies_uvv(pfad, personen, fp_personen):
             for roh, anzeige, _ in personen_aus_zelle(werte[i_fk] if i_fk < len(werte) else "")[:1]:
                 fk = personen.add(roh, anzeige, 3, f"{titel} Z. {nr} (Verantw. Führungskraft)")
             abt = re.sub(r"\s*\[.*?\]", "", t(werte[i_abt]) if i_abt < len(werte) else "")
-            z = UVVZeile(titel, nr, name, abt, oe_schluessel(abt), fk, bem)
+            gb = datum(werte[i_gb]) if i_gb is not None and i_gb < len(werte) and werte[i_gb] else None
+            z = UVVZeile(titel, nr, name, abt, oe_schluessel(abt), fk, bem, gb.date() if gb else None)
             if ist_master:
                 uvv.master[schreibform(name)].append(z)
                 master_zeilen[z.oe].append(z)
+                uvv.master_je_oe[z.oe].append(z)
                 nach, vor = [x.strip() for x in name.split(",", 1)]
                 if personen.finde(tokens(f"{vor} {nach}")) in fp_personen:   # Schreibweise der Personalliste
                     personen.add(name, f"{vor} {nach}", 1, f"{titel} Z. {nr} (Personalliste)", vor)
             else:
                 uvv.blatt[schreibform(name)].append((fp, z))
+                uvv.zeilen_je_blatt[titel].append(z)
                 blatt_zeilen[z.oe].append(z)
                 if fp:
                     uvv.fp_je_oe[z.oe][fp] += 1
@@ -516,9 +572,13 @@ def lies_uvv(pfad, personen, fp_personen):
         if n >= 0.8 * sum(c.values()) and alt_pid != pid:
             neu = next(z.fk for z in zs if z.fk and z.fk.pid == pid)
             alt = next(z.fk for z in master_zeilen[oe] if z.fk and z.fk.pid == alt_pid)
-            notiz = "; ".join(eindeutig(z.bemerkung for z in zs if z.fk is neu and z.bemerkung))
-            uvv.fk_wechsel[oe] = (neu, alt, notiz, ", ".join(eindeutig(z.blatt for z in zs if z.fk is neu)),
-                                  oe_kurz(zs[0].abt))
+            blaetter = eindeutig(z.blatt for z in zs if z.fk is neu)
+            uvv.fk_wechsel[oe] = Wechsel(
+                neu=neu, alt=alt, blatt=", ".join(blaetter), oe=oe_kurz(zs[0].abt),
+                anzahl=len({schreibform(z.name) for z in zs if z.fk is neu}),
+                gesamt=len({schreibform(z.name) for z in master_zeilen[oe]}),
+                notiz="; ".join(eindeutig(z.bemerkung for z in zs if z.fk is neu and z.bemerkung)),
+                blattnotiz="; ".join(eindeutig(x for k in blaetter for x in uvv.blatt_notizen.get(k, []))))
     return uvv
 
 
@@ -601,48 +661,84 @@ def fuehrung_mit_uvv(b, vg, zeilen, info, uvv):
     Eindeutig, wenn zwei Quellen übereinstimmen; die Übersicht ist der aktuellste Stand je Mitarbeiter."""
     fk, oe = info.fk, oe_kurz(b.abt)
     hinweise = []
-    if info.fk_alt is not None:
+    if info.wechsel is not None:
+        hinweise.append(info.wechsel.text())
+        if info.abgeleitet:
+            hinweise.append(f"{b.name} {b.vorname} steht nicht auf dem Blatt „{info.wechsel.blatt}“ – Führungskraft "
+                            f"und Feinplaner aus den übrigen Mitarbeitern der OE abgeleitet (UVV-Übersicht: "
+                            f"{info.wechsel.alt.anzeige})")
+    elif info.fk_alt is not None:
         hinweise.append(f"Führungskraft laut {info.fk_quelle}: {fk.anzeige}"
                         + (f" („{info.fk_notiz}“)" if info.fk_notiz else "")
                         + f"; die UVV-Übersicht nennt noch {info.fk_alt.anzeige}")
     if vg is not None and vg is fk:
         return Entscheidung("eindeutig", f"Kundenbedarf und {info.fk_quelle} nennen {fk.anzeige}", an=fk), hinweise
-    if treffer_zeilen(fk, zeilen):
+    treffer = treffer_zeilen(fk, zeilen)
+    vg_text = vg.anzeige if vg is not None else "keinen Vorgesetzten"
+    if treffer:
+        nur_bl = all(z.ist_bl_zeile for z in treffer)          # Übersicht nur durch die übergeordnete Zeile gestützt
+        vg_regulaer = vg is not None and any(not z.ist_bl_zeile for z in treffer_zeilen(vg, zeilen))
+        vg_zustand = uvv.zustand(vg) if vg is not None else ""
+        if nur_bl and vg_regulaer and not vg_zustand:
+            return Entscheidung("Klärfall", f"Kundenbedarf und Feinplaner-Liste nennen {vg_text}, {info.fk_quelle} "
+                                f"nennt {fk.anzeige} (Feinplaner-Liste nur in der Zeile „Bezirksleiter“)",
+                                gruppe=f"{b.abt} – {vg_text} / {fk.anzeige}"), hinweise
         if vg is not None:
-            z = uvv.zustand(vg)
-            anders = f"Kundenbedarf nennt {vg.anzeige}" + (f" (UVV-Übersicht: „{z}“)" if z else "")
+            anders = (f"Kundenbedarf nennt {vg.anzeige}" + (", die Feinplaner-Liste ebenfalls" if vg_regulaer else "")
+                      + (f" (UVV-Übersicht: „{vg_zustand}“)" if vg_zustand else ""))
         else:
             anders = "Kundenbedarf ohne Vorgesetzten"
-        hinweise.append(f"{anders} – laut {info.fk_quelle} und Feinplaner-Liste ist {fk.anzeige} zuständig")
-        return Entscheidung("eindeutig", f"{info.fk_quelle} und Feinplaner-Liste nennen {fk.anzeige}; {anders}",
+        stuetze = "Feinplaner-Liste nur in der Zeile „Bezirksleiter“" if nur_bl else "Feinplaner-Liste bestätigt"
+        hinweise.append(f"{anders} – laut {info.fk_quelle} ist {fk.anzeige} zuständig ({stuetze})")
+        return Entscheidung("eindeutig", f"{info.fk_quelle} nennt {fk.anzeige} ({stuetze}); {anders}",
                             an=fk), hinweise
-    vg_text = vg.anzeige if vg is not None else "keinen Vorgesetzten"
     return Entscheidung("Klärfall", f"Kundenbedarf nennt {vg_text}, {info.fk_quelle} nennt {fk.anzeige}; "
                         f"Feinplaner-Liste für OE {oe}: {bl_uebersicht(zeilen)}",
                         gruppe=f"{b.abt} – {vg_text} / {fk.anzeige}"), hinweise
 
 
 def feinplaner_mit_uvv(b, fk, zeilen, info, uvv):
-    """Feinplaner (Cc) je Mitarbeiter: eigenes Feinplaner-Blatt > Feinplaner-Liste, mehrdeutige Listeneinträge
-    eingegrenzt über die Übersicht (Blätter anderer Mitarbeiter der OE, Bemerkungen „laut …“)."""
+    """Feinplaner (Cc) je Mitarbeiter:
+    1. eigenes Feinplaner-Blatt;
+    2. sonst Feinplaner-Liste für OE und Führungskraft (normale Zeilen vor Zeilen „Bezirksleiter“). Ein Feinplaner,
+       dessen eigenes Blatt keinen Mitarbeiter der OE führt, obwohl welche im Zeitraum des Blatts fällig sind,
+       betreut die OE offenbar nicht und scheidet aus;
+    3. bleiben mehrere, grenzen Bemerkungen „laut …“ oder Blätter anderer Mitarbeiter der OE ein."""
     oe = oe_kurz(b.abt)
-    treffer = treffer_zeilen(fk, zeilen)
-    liste = fp_aus([z for z in treffer if not z.ist_bl_zeile]) or fp_aus(treffer)
     if info is not None and info.fps:
         if len(info.fps) == 1:
             return info.fps, f"Feinplaner-Blatt „{info.blaetter[0]}“", []
-        schnitt = [p for p in info.fps if p in liste]
+        schnitt = [p for p in info.fps if p in fp_aus(treffer_zeilen(fk, zeilen))]
         if len(schnitt) == 1:
             return schnitt, "Feinplaner-Blatt und Feinplaner-Liste", []
+        blaetter = "; ".join(k + (f": „{info.blatt_bemerkung[k]}“" if k in info.blatt_bemerkung else "")
+                             for k in info.blaetter)
         return info.fps, "mehrere Feinplaner-Blätter", [
-            f"{b.name} {b.vorname} steht auf mehreren Feinplaner-Blättern ({', '.join(info.blaetter)}) – "
-            "alle in Cc, bitte prüfen"]
+            f"{b.name} {b.vorname} steht auf mehreren Feinplaner-Blättern ({blaetter}) – alle in Cc, bitte prüfen"]
+    treffer = treffer_zeilen(fk, zeilen)
+    regulaer, alle_tr = fp_aus([z for z in treffer if not z.ist_bl_zeile]), fp_aus(treffer)
+    raus = {p.pid: g for p in alle_tr if (g := uvv.nicht_zustaendig(p, b.oe))}
+    ausgeschieden = [p for p in alle_tr if p.pid in raus]
+    liste = [p for p in regulaer if p.pid not in raus] or [p for p in alle_tr if p.pid not in raus]
+    hinweise = []
+    if ausgeschieden and not liste:          # alle Kandidaten scheiden aus: offen lassen
+        return alle_tr, "Feinplaner-Liste (offen)", [
+            f"Feinplaner für OE {oe} offen: " + "; ".join(f"{p.anzeige} – {raus[p.pid]}" for p in ausgeschieden)
+            + " – alle in Cc, bitte klären"]
+    zusatz = (f"; nicht {namen(ausgeschieden)}, dessen Blatt keinen Mitarbeiter der OE führt" if ausgeschieden else "")
+    if ausgeschieden and not [p for p in regulaer if p.pid not in raus]:
+        hinweise.append(f"Feinplaner für OE {oe}: Die Feinplaner-Liste nennt {namen(ausgeschieden)}, aber "
+                        + "; ".join(raus[p.pid] for p in ausgeschieden)
+                        + f". Deshalb {namen(liste)} (Feinplaner-Liste, Zeile „Bezirksleiter“) – bitte bestätigen")
     blatt_oe, laut_oe = uvv.fp_je_oe.get(b.oe, Counter()), uvv.laut_je_oe.get(b.oe, Counter())
     if len(liste) == 1:
-        extra = [p for p in fp_aus(treffer) if p not in liste]
-        return liste, "Feinplaner-Liste", ([
-            f"Feinplaner für OE {oe} nur aus der Feinplaner-Liste ({liste[0].anzeige}); die Zeile „Bezirksleiter“ "
-            f"nennt zusätzlich {namen(extra)}"] if extra else [])
+        laut = uvv.laut_belege.get((b.oe, liste[0].pid))
+        extra = [p for p in alle_tr if p not in liste and p.pid not in raus]
+        if extra:
+            hinweise.append(f"Feinplaner für OE {oe} nur aus der Feinplaner-Liste ({liste[0].anzeige}); die Zeile "
+                            f"„Bezirksleiter“ nennt zusätzlich {namen(extra)}")
+        return liste, ("Feinplaner-Liste" + zusatz
+                       + (f"; Bemerkung „{laut[0]}“ bei anderen Mitarbeitern der OE" if laut else "")), hinweise
     if liste:
         for belege, art in ((laut_oe, "laut"), (blatt_oe, "blatt")):
             schnitt = [p for p in liste if p in belege]
@@ -650,8 +746,8 @@ def feinplaner_mit_uvv(b, fk, zeilen, info, uvv):
                 p = schnitt[0]
                 beleg = (f"Bemerkung „{uvv.laut_belege[(b.oe, p.pid)][0]}“ bei anderen Mitarbeitern der OE"
                          if art == "laut" else f"Feinplaner-Blatt „{blatt_von(uvv, p)}“ (andere Mitarbeiter der OE)")
-                return schnitt, f"Feinplaner-Liste ({namen(liste)}), eingegrenzt durch {beleg}", []
-        return liste, "Feinplaner-Liste (mehrdeutig)", [
+                return schnitt, f"Feinplaner-Liste ({namen(liste)}), eingegrenzt durch {beleg}{zusatz}", hinweise
+        return liste, "Feinplaner-Liste (mehrdeutig)" + zusatz, hinweise + [
             f"Feinplaner für {fk.anzeige} / OE {oe} nicht eindeutig: {namen(liste)} – alle in Cc, bitte prüfen"]
     belege = blatt_oe + laut_oe
     if len(belege) == 1:
@@ -730,6 +826,8 @@ def zuordnen(bedarfe, alle_bedarfe, fp_zeilen, personen, manuell, uvv=None):
 
         if info is not None:
             e.fk_uvv = info.fk.anzeige if info.fk else ""
+            if info.abgeleitet:
+                e.fk_uvv += f" (abgeleitet aus Blatt „{info.wechsel.blatt}“; UVV-Übersicht: {info.wechsel.alt.anzeige})"
             raus = [x for x in info.bemerkungen if RAUS.search(x)]
             if raus:     # laut Übersicht nicht mehr dabei: nicht anschreiben, nur vorschlagen
                 wohin = ([{"an": e.an.anzeige, "cc": [p.anzeige for p in e.cc],
@@ -1299,9 +1397,8 @@ def main():
                         + ", ".join(f"„{k}“ = {v.anzeige if v else 'nicht erkannt'}" for k, v in uvv.blatt_fp.items())
                         + ". Für Feinplaner ohne eigenes Blatt gilt die Feinplaner-Liste, eingegrenzt durch Bemerkungen "
                           "„laut …“ in der Übersicht.")
-        for neu, alt, notiz, blatt_name, oe in sorted(uvv.fk_wechsel.values(), key=lambda w: w[4]):
-            hinweise.append(f"Führungswechsel laut Feinplaner-Blatt „{blatt_name}“: OE {oe} → {neu.anzeige}"
-                            + (f" („{notiz}“)" if notiz else "") + f"; die UVV-Übersicht nennt noch {alt.anzeige}.")
+        for w in sorted(uvv.fk_wechsel.values(), key=lambda w: w.oe):
+            hinweise.append(w.text() + ".")
     relevant = {em.an.pid for em in emails} | {p.pid for em in emails for p in em.cc}
     relevant_namen = {v["an"] for g in gruppen for v in g["vorschlaege"]} | {
         c for g in gruppen for v in g["vorschlaege"] for c in v["cc"]}
